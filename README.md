@@ -175,7 +175,7 @@ SecureLocalVideoServer/
 
 ---
 
-## 用户须知
+## 用户须知与免责声明
 
 使用本软件即表示用户理解并接受相关使用风险。
 
@@ -192,7 +192,7 @@ SecureLocalVideoServer/
 详细内容请查看：
 
 ```text
-用户须知.md
+用户须知与免责声明.md
 ```
 
 ---
