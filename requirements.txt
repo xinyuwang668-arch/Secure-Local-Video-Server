@@ -1,0 +1,11 @@
+# SecureLocalVideoServer
+
+#
+
+# Python standard library is used for the main application.
+
+# No additional Python packages are required for normal execution.
+
+#
+
+# Python 3.10+ recommended.
