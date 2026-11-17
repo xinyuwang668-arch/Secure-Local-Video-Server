@@ -101,6 +101,67 @@ def get_mime_type(filename: str) -> str:
     return MIME_TYPES.get(ext) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
+def mp4_duration(path: str) -> float:
+    """只读 MP4/MOV 的 moov/mvhd，拿到时长（秒）；失败返回 0。"""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            offset = 0
+            while offset + 8 <= size:
+                handle.seek(offset)
+                head = handle.read(8)
+                if len(head) < 8:
+                    break
+                box_size = int.from_bytes(head[0:4], "big")
+                box_type = head[4:8]
+                if box_size < 8:
+                    break
+                if box_type == b"moov":
+                    end = min(offset + box_size, size)
+                    pos = offset + 8
+                    while pos + 8 <= end:
+                        handle.seek(pos)
+                        sub = handle.read(8)
+                        if len(sub) < 8:
+                            break
+                        sub_size = int.from_bytes(sub[0:4], "big")
+                        if sub_size < 8:
+                            break
+                        if sub[4:8] == b"mvhd":
+                            body = handle.read(min(sub_size - 8, 64))
+                            if len(body) < 20:
+                                return 0.0
+                            version = body[0]
+                            if version == 1:
+                                timescale = int.from_bytes(body[20:24], "big")
+                                duration = int.from_bytes(body[24:32], "big")
+                            else:
+                                timescale = int.from_bytes(body[12:16], "big")
+                                duration = int.from_bytes(body[16:20], "big")
+                            if timescale <= 0:
+                                return 0.0
+                            return duration / float(timescale)
+                        pos += sub_size
+                    return 0.0
+                offset += box_size
+    except (OSError, ValueError):
+        return 0.0
+    return 0.0
+
+
+def stream_rate(path: str, size: int) -> float:
+    """这条流每秒最多发多少字节。
+
+    播放器只需要「稍微快于码率」的带宽；把上限压到码率的 1.6 倍，
+    下载器就得陪着页面一起熬时间，页面一走心跳，流就断。
+    """
+    duration = mp4_duration(path)
+    if duration > 0.5:
+        bitrate = size / duration
+        return min(max(bitrate * 1.25, 0.8 * 1024 * 1024), 24 * 1024 * 1024)
+    return 1.5 * 1024 * 1024
+
+
 # ============================================================
 # 分享状态
 # ============================================================
@@ -247,6 +308,13 @@ class ShareState:
 
     def beat_fresh(self, session: dict) -> bool:
         return time.time() - float(session.get("beat", 0.0)) <= HEARTBEAT_TTL
+
+    def stop_beat(self, sid: str) -> None:
+        """页面切走时立刻作废心跳，不必等 TTL。"""
+        with self._lock:
+            session = self.sessions.get(sid)
+            if session is not None:
+                session["beat"] = 0.0
 
     def begin_stream(self, session: dict) -> int:
         """开一条新的取流连接，同会话之前的连接立刻作废。"""
@@ -428,7 +496,12 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     beat().then(startPlayback);
     setInterval(beat, 2000);
     document.addEventListener("visibilitychange", function () {
-        if (document.visibilityState === "visible") { beat(); }
+        if (document.visibilityState === "visible") {
+            beat();
+        } else {
+            // 切走就立刻断流，不等服务器 TTL。
+            try { navigator.sendBeacon(HB + "?stop=1"); } catch (e) {}
+        }
     });
 
     function fmt(sec) {
@@ -609,6 +682,10 @@ def heartbeat(sid, ticket):
     if STATE.session_ok(sid, ticket, user_agent) is None:
         abort(403)
 
+    if request.args.get("stop"):
+        STATE.stop_beat(sid)
+        return make_response("", 204)
+
     if not STATE.beat(sid):
         abort(403)
 
@@ -649,8 +726,16 @@ def parse_range(header: str, size: int):
 
 
 def iter_file(path: str, start: int, length: int, deadline: float,
-              session: dict, seq: int):
+              session: dict, seq: int, rate: float):
+    """按 rate（字节/秒）限速发送。
+
+    限速是为了让「取流」跟播放速度差不多：下载器想拿完整个文件，
+    就必须让页面一直活着并持续心跳；页面一隐藏，心跳断，流立刻停。
+    """
     remaining = length
+    burst = rate * 1.0
+    began = time.time()
+    sent = 0
     with open(path, "rb") as handle:
         handle.seek(start)
         while remaining > 0:
@@ -659,10 +744,18 @@ def iter_file(path: str, start: int, length: int, deadline: float,
             # 心跳断了 / 被新连接顶掉，立刻停止发送。
             if not STATE.stream_alive(session, seq):
                 break
-            data = handle.read(min(CHUNK_SIZE, remaining))
+            allowed = burst + rate * (time.time() - began)
+            if sent >= allowed:
+                time.sleep(0.05)
+                continue
+            want = min(CHUNK_SIZE, remaining)
+            if sent + want > allowed:
+                want = max(1, int(allowed - sent))
+            data = handle.read(want)
             if not data:
                 break
             remaining -= len(data)
+            sent += len(data)
             yield data
 
 
@@ -748,7 +841,8 @@ def stream_video(sid, ticket):
     seq = STATE.begin_stream(session)
 
     response = Response(
-        iter_file(path, start, length, deadline, session, seq),
+        iter_file(path, start, length, deadline, session, seq,
+                  stream_rate(path, size)),
         status=status,
         mimetype=mime,
         direct_passthrough=True,
