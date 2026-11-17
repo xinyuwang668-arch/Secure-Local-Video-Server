@@ -4,6 +4,8 @@
 
 本软件适合朋友之间进行临时视频分享。用户可以选择本地视频，并通过网络生成访问地址，使其他用户能够使用浏览器访问并在线播放。
 
+当前版本：**2.1.0**
+
 > **注意：本软件主要用于临时在线播放分享，不保证视频绝对无法被保存、缓存、复制或通过其他方式获取。请勿将本软件用于分享违法、侵权或未经授权的内容。**
 
 ---
@@ -11,13 +13,27 @@
 ## 功能
 
 * 本地视频在线播放
-* 临时网络分享
-* 浏览器访问
+* 临时网络分享，链接会过期、可随时撤销
+* 浏览器访问，无需安装播放器
 * 支持文件拖拽
 * 分享链接生成
 * 可配合 Cloudflare Tunnel 使用
 * Windows 图形化操作界面
 * 无需每次通过命令行启动
+
+---
+
+## 2.1.0 的安全机制
+
+2.1.0 在 2.0.0 的基础上重写了链接与会话逻辑，目标是「能看、不能拿」。
+
+* **会话化访问**：打开分享页面时会校验链接 token，通过后才下发会话 Cookie；之后播放地址必须同时匹配 Cookie、UA 指纹与 Referer，单靠复制视频地址打不开。
+* **不落盘**：链接 token、会话、过期时间全部保存在内存，程序退出即消失。
+* **防下载**：拦截 curl、wget、yt-dlp、ffmpeg、IDM 等常见下载工具的 UA；页面屏蔽右键、拖拽与 `Ctrl+S`，播放器去掉下载按钮。
+* **走动水印**：播放页面每 9 秒移动一次水印，显示会话 ID 前 10 位，录屏可追溯。
+* **防索引**：`/` 与 `/robots.txt` 返回 404，响应头带 `X-Robots-Tag: noindex`，页面 CSP 为 `default-src 'none'`。
+* **自动失效**：单个链接最长 30 分钟，到期自动断开；单会话限速 180 次/分钟，最多 6 个会话。
+* **就近端口**：服务监听 `127.0.0.1` 上的系统随机空闲端口，不再固定 8000，重启不会被占用。
 
 ---
 
@@ -39,23 +55,24 @@
 SecureLocalVideoServer.exe
 ```
 
-启动软件后，根据界面提示选择需要分享的视频。
+启动软件后，点击「选择视频」挑选需要分享的文件。
 
 ### 2. 选择视频
 
-可以通过文件选择功能选择本地视频。
+可以通过文件选择功能选择本地视频，部分操作支持直接将视频文件拖拽到软件窗口。
 
-部分操作支持直接将视频文件拖拽到软件指定区域。
+### 3. 生成分享链接
 
-### 3. 开启分享
+点击「生成分享链接」后，软件会启动本地服务并建立 Cloudflare Tunnel，
+生成形如 `https://xxx.trycloudflare.com/v/...` 的外部访问地址。
 
-启动视频服务器后，软件会根据当前配置提供视频访问地址。
-
-如果使用 Cloudflare Tunnel，软件可以通过 Cloudflare 提供的网络连接方式生成可以从外部访问的地址。
+> 新生成的域名可能需要几秒到十几秒才可被解析，刚拿到链接时打不开属正常现象。
 
 ### 4. 分享链接
 
 将生成的访问地址发送给需要观看视频的朋友即可。
+
+对方打开后即可在浏览器里播放；链接过期或被「撤销」后立即失效。
 
 请注意：
 
@@ -84,7 +101,7 @@ SecureLocalVideoServer.exe
 推荐普通用户下载 Release 中提供的：
 
 ```text
-SecureLocalVideoServer_Setup.exe
+SecureLocalVideoServer_Setup_V2.1.0.exe
 ```
 
 源码用户可以直接下载本项目源代码。
@@ -107,9 +124,11 @@ SecureLocalVideoServer_Setup.exe
 
 本项目主要使用：
 
-* Python
+* Python 3.10
 * Tkinter
+* Flask
 * PyInstaller
+* Inno Setup
 * Cloudflare Tunnel / cloudflared
 
 具体依赖请参阅：
@@ -122,34 +141,53 @@ requirements.txt
 
 ## 从源码运行
 
-安装 Python 后，在项目目录运行：
+安装 Python 3.10 后，在项目目录运行：
 
 ```bash
-pip install -r requirements.txt
+py -3.10 -m pip install -r requirements.txt
 ```
 
-然后运行：
+将 `cloudflared.exe` 放到项目根目录（下载地址见下），然后运行：
 
 ```bash
-python server_gui_v2.py
+py -3.10 server_gui_v2.py
 ```
+
+`cloudflared.exe` 体积约 55 MB，未纳入仓库，请从
+<https://github.com/cloudflare/cloudflared/releases> 下载 Windows amd64 版本。
 
 ---
 
 ## 从源码打包
 
-本项目使用 PyInstaller 打包。
+双击 `build.bat`，或在命令行运行：
 
-示例：
-
-```bash
-python -m PyInstaller --noconfirm --clean --windowed --onedir --name "SecureLocalVideoServer" --add-binary "cloudflared.exe;." server_gui_v2.py
+```bat
+build.bat
 ```
 
-生成的文件通常位于：
+生成的文件位于：
 
 ```text
 dist\SecureLocalVideoServer\
+```
+
+再生成安装包（需要 Inno Setup 6）：
+
+```bat
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" VideoLinkServer.iss
+```
+
+安装包输出到 `installer_output\`。
+
+---
+
+## 测试
+
+```bat
+py -3.10 tests\test_server.py     :: 单元测试
+py -3.10 tests\smoke_http.py      :: 真实 socket 冒烟测试
+py -3.10 tests\smoke_tunnel.py    :: 端到端测试（含真实 Cloudflare 隧道）
 ```
 
 ---
@@ -160,16 +198,24 @@ dist\SecureLocalVideoServer\
 SecureLocalVideoServer/
 │
 ├─ server_gui_v2.py
+├─ build.bat
+├─ version_info.txt
+├─ VideoLinkServer.iss
+├─ SecureLocalVideoServer.ico
 ├─ README.md
+├─ CHANGELOG.md
 ├─ LICENSE
 ├─ requirements.txt
 ├─ .gitignore
-├─ 用户须知.md
+├─ 用户须知与免责声明.md
 │
 ├─ assets/
 │   └─ ...
 │
-└─ releases/
+└─ tests/
+    ├─ test_server.py
+    ├─ smoke_http.py
+    ├─ smoke_tunnel.py
     └─ ...
 ```
 
@@ -253,4 +299,3 @@ This software is provided for personal and legitimate use.
 The developer is not responsible for illegal, unauthorized, infringing, abusive, fraudulent, or otherwise improper use of this software.
 
 Users are responsible for the content they share and for complying with applicable laws and third-party service terms.
-

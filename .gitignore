@@ -69,3 +69,13 @@ tests_local/
 
 private/
 secret/
+
+# Build artifacts (Inno Setup)
+installer_output/
+
+# Third-party binary, see README for download link
+cloudflared.exe
+cloudflared.log
+
+# Local backups
+_backup_*/

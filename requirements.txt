@@ -1,11 +1,15 @@
 # SecureLocalVideoServer
 
-#
+Python 3.10+ 推荐。
 
-# Python standard library is used for the main application.
+正常使用图形界面运行需要 Flask：
 
-# No additional Python packages are required for normal execution.
+```text
+flask>=3.0
+```
 
-#
+打包（可选）：
 
-# Python 3.10+ recommended.
+```text
+pyinstaller>=6.0
+```
