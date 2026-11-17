@@ -1,5 +1,6 @@
 [Setup]
-AppId={{8F3C1D62-5B4A-4F0E-9B7E-2D6A1C4E8B93}
+; 不写 AppId：Inno 会用 AppName 推导（"Secure Local Video Server_is1"），
+; 与 2.0.0 老安装包保持同一身份，安装时能识别并直接升级覆盖，不会并存两份。
 AppName=Secure Local Video Server
 AppVersion=2.1.0
 AppVerName=Secure Local Video Server 2.1.0
@@ -21,27 +22,34 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-; 升级安装时先关掉正在运行的程序，避免文件占用
+; 已装过旧版本时先关掉旧程序，避免文件占用
 CloseApplications=yes
 RestartApplications=no
+
+
+[InstallDelete]
+
+; 旧版本的 PyInstaller 目录整体清掉，避免残留旧版 _internal 文件
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\SecureLocalVideoServer.exe"
 
 
 [Files]
 
 ; ===== 主程序 =====
-Source: "D:\VideoServer\dist\SecureLocalVideoServer\SecureLocalVideoServer.exe"; \
+Source: "dist\SecureLocalVideoServer\SecureLocalVideoServer.exe"; \
     DestDir: "{app}"; \
     Flags: ignoreversion
 
 
 ; ===== PyInstaller 内部文件（含 cloudflared.exe）=====
-Source: "D:\VideoServer\dist\SecureLocalVideoServer\_internal\*"; \
+Source: "dist\SecureLocalVideoServer\_internal\*"; \
     DestDir: "{app}\_internal"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 
 ; ===== 程序图标 =====
-Source: "D:\VideoServer\SecureLocalVideoServer.ico"; \
+Source: "SecureLocalVideoServer.ico"; \
     DestDir: "{app}"; \
     Flags: ignoreversion
 
@@ -73,5 +81,4 @@ Filename: "{app}\SecureLocalVideoServer.exe"; \
 
 [UninstallDelete]
 
-; PyInstaller onedir 的 _internal 目录由卸载器清理不干净时兜底
 Type: filesandordirs; Name: "{app}\_internal"
