@@ -32,7 +32,7 @@ from werkzeug.serving import make_server
 # ============================================================
 
 APP_NAME = "Secure Local Video Server"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 HOST = "127.0.0.1"
 # 端口 0 = 由系统分配空闲端口，避免固定 8000 被占用导致启动失败。
@@ -581,7 +581,15 @@ def stream_video(sid, ticket):
         abort(403)
 
     dest = request.headers.get("Sec-Fetch-Dest", "").lower()
-    if dest not in ("", "video"):
+    fetch_aware = any(
+        request.headers.get(name) is not None
+        for name in ("Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site")
+    )
+
+    # 浏览器媒体管道取流时一定带 Sec-Fetch-Dest: video。
+    # 播放器里的「下载」按钮走的是下载器 / 脚本，Dest 是 empty、document 之类，
+    # 一律挡掉——这是目前唯一能把「看」和「存」分开的信号。
+    if fetch_aware and dest != "video":
         abort(403)
 
     # 会话 Cookie 必须与 URL 中的会话一致，光有链接拿不到媒体。
@@ -600,8 +608,8 @@ def stream_video(sid, ticket):
         allowed.discard("")
         if ref_host not in allowed:
             abort(403)
-    elif not dest:
-        # 既不声明 Fetch 目的地、又没有 Referer，视为脚本直连。
+    elif not fetch_aware:
+        # 完全不发 Fetch Metadata 的老浏览器，要求至少带上正确来源页。
         abort(403)
 
     path = STATE.file_path
