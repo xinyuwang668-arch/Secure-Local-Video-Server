@@ -1,9 +1,9 @@
-﻿[Setup]
+[Setup]
 ; 不写 AppId：Inno 会用 AppName 推导（"Secure Local Video Server_is1"），
 ; 与 2.0.0 老安装包保持同一身份，安装时能识别并直接升级覆盖，不会并存两份。
 AppName=Secure Local Video Server
-AppVersion=2.1.2
-AppVerName=Secure Local Video Server 2.1.2
+AppVersion=2.1.3
+AppVerName=Secure Local Video Server 2.1.3
 AppPublisher=Xinyu Wang
 
 DefaultDirName={autopf}\SecureLocalVideoServer
@@ -11,7 +11,7 @@ DefaultGroupName=Secure Local Video Server
 DisableProgramGroupPage=yes
 
 OutputDir=installer_output
-OutputBaseFilename=SecureLocalVideoServer_Setup_V2.1.2
+OutputBaseFilename=SecureLocalVideoServer_Setup_V2.1.3
 
 Compression=lzma2
 SolidCompression=yes

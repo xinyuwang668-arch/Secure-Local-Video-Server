@@ -47,6 +47,9 @@ def main():
     media = body[start:body.index('"', start)]
     sid, ticket = media.strip("/").split("/")[1:3]
 
+    MEDIA = {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors",
+             "Sec-Fetch-Site": "same-origin"}
+
     def beat():
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         c.request("POST", f"/h/{sid}/{ticket}",
@@ -64,7 +67,7 @@ def main():
         begin = time.time()
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
         c.request("GET", media, headers={
-            "User-Agent": UA, "Cookie": cookie, "Sec-Fetch-Dest": "video",
+            "User-Agent": UA, "Cookie": cookie, **MEDIA,
             "Referer": local + "/v/" + slvs.STATE.link_token})
         r = c.getresponse()
         try:
@@ -95,7 +98,7 @@ def main():
     beat()
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     c.request("GET", media, headers={
-        "User-Agent": UA, "Cookie": cookie, "Sec-Fetch-Dest": "video",
+        "User-Agent": UA, "Cookie": cookie, **MEDIA,
         "Referer": local + "/v/" + slvs.STATE.link_token, "Range": "bytes=0-1023"})
     r = c.getresponse()
     r.read()

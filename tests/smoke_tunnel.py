@@ -95,7 +95,8 @@ def main():
 
         req = urllib.request.Request(media, headers={
             "User-Agent": UA, "Cookie": sid_cookie,
-            "Sec-Fetch-Dest": "video", "Referer": public,
+            "Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors",
+            "Sec-Fetch-Site": "same-origin", "Referer": public,
             "Range": "bytes=0-1023"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             chunk = resp.read()

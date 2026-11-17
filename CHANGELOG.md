@@ -1,5 +1,22 @@
 # 更新日志
 
+## 2.1.3 — 2026-11-18
+
+### 安全
+
+- 媒体接口改成严格校验 Fetch Metadata 三件套：`Sec-Fetch-Dest: video` +
+  `Sec-Fetch-Mode: no-cors` + `Sec-Fetch-Site: same-origin`，缺任何一个直接 403。
+  页面里用 `fetch` / XHR 拉流（`Dest: empty`、`Mode: cors`）现在被拒；
+  IDM、迅雷这类不发行 Fetch Metadata 的下载器也一律拿不到流。
+- 取消 2.1.1 里「没有 Fetch Metadata 的老浏览器按 Referer 放行」的后门——那条规则
+  正是油猴脚本 + 下载器能绕过的入口。
+
+### 变更
+
+- 版本号、安装包同步到 2.1.3；安装包仍可直接覆盖 2.1.2 / 2.1.1 / 2.1.0 / 2.0.0。
+- 新增 `tests/dump_headers.py`（打印真实浏览器请求头，排障用）、
+  `tests/check_download_block.py` 增加「脚本 fetch」用例。
+
 ## 2.1.2 — 2026-11-18
 
 ### 安全

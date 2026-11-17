@@ -106,6 +106,8 @@ class SLVSTestCase(unittest.TestCase):
     def _headers(self, **extra):
         headers = {"User-Agent": BROWSER_UA,
                    "Sec-Fetch-Dest": "video",
+                   "Sec-Fetch-Mode": "no-cors",
+                   "Sec-Fetch-Site": "same-origin",
                    "Referer": slvs.STATE.local_url}
         headers.update(extra)
         return headers
@@ -160,6 +162,18 @@ class SLVSTestCase(unittest.TestCase):
     def test_stream_wrong_fetch_dest(self):
         url = self._open_page()
         resp = self.client.get(url, headers=self._headers(**{"Sec-Fetch-Dest": "script"}))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_stream_script_fetch_rejected(self):
+        # 页面里的 JS 用 fetch 拉媒体：Dest 是 empty、Mode 是 cors。
+        url = self._open_page()
+        resp = self.client.get(url, headers=self._headers(
+            **{"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"}))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_stream_without_site_rejected(self):
+        url = self._open_page()
+        resp = self.client.get(url, headers=self._headers(**{"Sec-Fetch-Site": ""}))
         self.assertEqual(resp.status_code, 403)
 
     def test_ua_switch_rejected(self):

@@ -1,4 +1,7 @@
-"""验证：媒体地址只接受浏览器媒体管道的请求（Sec-Fetch-Dest: video）。"""
+"""验证：媒体地址只接受浏览器媒体管道（Dest=video + Mode=no-cors + Site=same-origin）。
+
+用法：python tests/check_download_block.py <base> <page>
+"""
 
 import http.cookiejar
 import re
@@ -23,6 +26,11 @@ sid, ticket = m.group(1), m.group(2)
 media = f"{base}/s/{sid}/{ticket}"
 print("media:", media)
 
+beat = urllib.request.Request(f"{base}/h/{sid}/{ticket}", data=b"",
+                              headers={"User-Agent": UA})
+with opener.open(beat, timeout=10) as r:
+    print("heartbeat:", r.status)
+
 
 def probe(label, extra):
     headers = {"User-Agent": UA, "Accept": "*/*", "Range": "bytes=0-1023"}
@@ -34,8 +42,13 @@ def probe(label, extra):
         print(f"{label}: {exc.code}")
 
 
-probe("媒体管道 (dest=video)", {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors",
-                               "Sec-Fetch-Site": "same-origin"})
-probe("下载器   (dest=empty)", {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "no-cors",
-                               "Sec-Fetch-Site": "same-origin"})
-probe("脚本直连 (无 Fetch 头)", {})
+PIPE = {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-origin"}
+probe("媒体管道 (video/no-cors/same-origin)", PIPE)
+probe("脚本 fetch (empty/cors/same-origin)",
+      {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors",
+       "Sec-Fetch-Site": "same-origin"})
+probe("下载器   (empty/no-cors/same-origin)",
+      {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "no-cors",
+       "Sec-Fetch-Site": "same-origin"})
+probe("IDM 类   (无 Fetch 头)", {})

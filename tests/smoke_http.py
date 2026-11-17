@@ -65,6 +65,9 @@ def main():
     start = body.index('var SRC = "') + len('var SRC = "')
     media_path = body[start:body.index('"', start)]
 
+    MEDIA = {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors",
+             "Sec-Fetch-Site": "same-origin"}
+
     def heartbeat(cookie_value, path):
         parts = path.strip("/").split("/")
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -87,7 +90,7 @@ def main():
     conn.close()
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     conn.request("GET", media_path, headers={
-        "User-Agent": UA, "Cookie": cold_cookie, "Sec-Fetch-Dest": "video",
+        "User-Agent": UA, "Cookie": cold_cookie, **MEDIA,
         "Referer": local})
     resp = conn.getresponse()
     resp.read()
@@ -101,7 +104,7 @@ def main():
     # 2. 正常播放：Range 请求
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     conn.request("GET", media_path, headers={
-        "User-Agent": UA, "Cookie": sid_cookie, "Sec-Fetch-Dest": "video",
+        "User-Agent": UA, "Cookie": sid_cookie, **MEDIA,
         "Referer": local, "Range": "bytes=1000-1999"})
     resp = conn.getresponse()
     chunk = resp.read()
@@ -114,7 +117,7 @@ def main():
     # 3. 完整下载（模拟播放器从头读）
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
     conn.request("GET", media_path, headers={
-        "User-Agent": UA, "Cookie": sid_cookie, "Sec-Fetch-Dest": "video",
+        "User-Agent": UA, "Cookie": sid_cookie, **MEDIA,
         "Referer": local})
     resp = conn.getresponse()
     data = resp.read()
@@ -135,7 +138,7 @@ def main():
     # 5. 没有 Cookie 直连媒体
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     conn.request("GET", media_path, headers={
-        "User-Agent": UA, "Sec-Fetch-Dest": "video", "Referer": local})
+        "User-Agent": UA, **MEDIA, "Referer": local})
     resp = conn.getresponse()
     resp.read()
     check("无 Cookie 被拒", resp.status == 403, f"({resp.status})")
@@ -145,7 +148,7 @@ def main():
     slvs.STATE.expires_at = time.time() - 1
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     conn.request("GET", media_path, headers={
-        "User-Agent": UA, "Cookie": sid_cookie, "Sec-Fetch-Dest": "video",
+        "User-Agent": UA, "Cookie": sid_cookie, **MEDIA,
         "Referer": local})
     resp = conn.getresponse()
     resp.read()
