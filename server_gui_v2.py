@@ -666,13 +666,84 @@ def server_error(_):
 # 界面
 # ============================================================
 
+from tkinter import ttk
+
+
+# ---- 配色 ----
+COLOR_BG = "#0c0f14"
+COLOR_CARD = "#151a22"
+COLOR_BORDER = "#242c3a"
+COLOR_INPUT = "#0f141c"
+COLOR_TEXT = "#e9eef7"
+COLOR_MUTED = "#8b96aa"
+COLOR_TRACK = "#1c2330"
+COLOR_ACCENT = "#4f8cff"
+COLOR_ACCENT_HI = "#6fa1ff"
+COLOR_DANGER = "#ff5f6b"
+
+UI_FONT = "Microsoft YaHei UI"
+MONO_FONT = "Cascadia Mono"
+
+
+def _button(parent, text, command, kind="ghost", width=None):
+    if kind == "primary":
+        bg, fg, hover = COLOR_ACCENT, "#ffffff", COLOR_ACCENT_HI
+    elif kind == "danger":
+        bg, fg, hover = "#1a1418", COLOR_DANGER, "#2a1a20"
+    else:
+        bg, fg, hover = "#1b2230", COLOR_TEXT, "#232c3d"
+
+    btn = tk.Button(
+        parent, text=text, command=command, width=width,
+        font=(UI_FONT, 10, "bold" if kind == "primary" else "normal"),
+        bg=bg, fg=fg, activebackground=hover, activeforeground=fg,
+        disabledforeground="#5b6478", relief="flat", bd=0,
+        highlightthickness=1,
+        highlightbackground=COLOR_BORDER if kind != "primary" else bg,
+        highlightcolor=COLOR_BORDER,
+        padx=18, pady=9, cursor="hand2",
+    )
+    btn.base_bg = bg
+    btn.hover_bg = hover
+
+    def enter(_):
+        if str(btn.cget("state")) != "disabled":
+            btn.configure(bg=hover)
+
+    def leave(_):
+        if str(btn.cget("state")) != "disabled":
+            btn.configure(bg=bg)
+
+    btn.bind("<Enter>", enter)
+    btn.bind("<Leave>", leave)
+    return btn
+
+
+def _set_enabled(btn, enabled):
+    btn.configure(state="normal" if enabled else "disabled",
+                  bg=btn.base_bg if enabled else "#171d27",
+                  cursor="hand2" if enabled else "arrow")
+
+
+def _entry(parent, textvariable=None, state="normal", font=None):
+    return tk.Entry(
+        parent, textvariable=textvariable, state=state,
+        font=font or (UI_FONT, 10),
+        bg=COLOR_INPUT, fg=COLOR_TEXT, disabledforeground=COLOR_MUTED,
+        readonlybackground=COLOR_INPUT, insertbackground=COLOR_TEXT,
+        relief="flat", highlightthickness=1,
+        highlightbackground=COLOR_BORDER, highlightcolor=COLOR_ACCENT, bd=0,
+    )
+
+
 class VideoServerGUI:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"{APP_NAME} v{APP_VERSION}")
-        self.root.geometry("900x790")
-        self.root.minsize(900, 790)
+        self.root.title(f"{APP_NAME} {APP_VERSION}")
+        self.root.geometry("960x920")
+        self.root.minsize(900, 860)
+        self.root.configure(bg=COLOR_BG)
 
         self.server = None
         self.server_thread = None
@@ -681,115 +752,273 @@ class VideoServerGUI:
         self.public_url = ""
         self.local_url = ""
         self.running = False
+        self.total_seconds = 0
         self._tick_job = None
         self._cf_buffer: list[str] = []
 
+        self._init_style()
         self.create_gui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._dark_titlebar()
+
+    def _dark_titlebar(self):
+        """Windows 10/11 深色标题栏，和界面配色统一。"""
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+
+            self.root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            value = ctypes.c_int(1)
+            for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE 新旧取值
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value))
+        except Exception:
+            pass
 
     # --------------------------------------------------------
-    # 界面
+    # 主题
+    # --------------------------------------------------------
+
+    def _init_style(self):
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+
+        style.configure(
+            "Dark.TCombobox",
+            fieldbackground=COLOR_INPUT, background=COLOR_CARD,
+            foreground=COLOR_TEXT, arrowcolor=COLOR_MUTED,
+            bordercolor=COLOR_BORDER, lightcolor=COLOR_CARD, darkcolor=COLOR_CARD,
+            selectbackground=COLOR_INPUT, selectforeground=COLOR_TEXT,
+            padding=6,
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("readonly", COLOR_INPUT)],
+            foreground=[("readonly", COLOR_TEXT)],
+            background=[("active", COLOR_CARD)],
+            selectbackground=[("readonly", COLOR_INPUT)],
+            selectforeground=[("readonly", COLOR_TEXT)],
+        )
+        style.configure(
+            "Bar.Horizontal.TProgressbar",
+            troughcolor=COLOR_TRACK, background=COLOR_ACCENT,
+            bordercolor=COLOR_CARD, lightcolor=COLOR_ACCENT, darkcolor=COLOR_ACCENT,
+            thickness=6,
+        )
+
+        self.root.option_add("*TCombobox*Listbox.background", COLOR_INPUT)
+        self.root.option_add("*TCombobox*Listbox.foreground", COLOR_TEXT)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", COLOR_ACCENT)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        self.root.option_add("*TCombobox*Listbox.borderWidth", 0)
+
+        style.configure(
+            "Dark.Vertical.TScrollbar",
+            gripcount=0, background="#2b3546", darkcolor="#1b2230",
+            lightcolor="#1b2230", troughcolor=COLOR_CARD,
+            bordercolor=COLOR_CARD, arrowcolor=COLOR_MUTED, arrowsize=12,
+        )
+        style.map(
+            "Dark.Vertical.TScrollbar",
+            background=[("active", "#3b4759")],
+        )
+
+    # --------------------------------------------------------
+    # 布局
     # --------------------------------------------------------
 
     def create_gui(self):
-        title = tk.Label(self.root, text="🔐 Secure Local Video Server",
-                         font=("Segoe UI", 20, "bold"))
-        title.pack(pady=(18, 2))
+        tk.Frame(self.root, bg=COLOR_ACCENT, height=3).pack(side="top", fill="x")
+
+        wrap = tk.Frame(self.root, bg=COLOR_BG)
+        wrap.pack(fill="both", expand=True, padx=26, pady=(18, 14))
+
+        self._build_header(wrap)
+        self._build_file_card(wrap)
+        self._build_setting_card(wrap)
+        self._build_link_card(wrap)
+        self._build_actions(wrap)
+        self._build_status(wrap)
 
         tk.Label(
-            self.root,
-            text="临时视频分享 · 随机 Token · 自动过期 · 仅浏览器可看",
-            font=("Segoe UI", 10),
-            fg="#555",
-        ).pack(pady=(0, 16))
+            wrap, text=f"v{APP_VERSION} · 仅监听 127.0.0.1 · 不写入任何磁盘记录",
+            bg=COLOR_BG, fg="#5e6879", font=(UI_FONT, 8),
+        ).pack(side="bottom", pady=(10, 0))
 
-        # ① 视频文件
-        file_frame = tk.LabelFrame(self.root, text="① 视频文件",
-                                   font=("Segoe UI", 10, "bold"), padx=10, pady=10)
-        file_frame.pack(fill="x", padx=25, pady=5)
+        self._build_log(wrap)
+
+    def _build_header(self, parent):
+        header = tk.Frame(parent, bg=COLOR_BG)
+        header.pack(fill="x", pady=(0, 16))
+
+        left = tk.Frame(header, bg=COLOR_BG)
+        left.pack(side="left")
+        tk.Label(left, text="Secure Local Video Server", bg=COLOR_BG, fg=COLOR_TEXT,
+                 font=(UI_FONT, 19, "bold")).pack(anchor="w")
+        tk.Label(left, text="临时视频分享 · 随机 Token · 自动过期 · 仅浏览器可看",
+                 bg=COLOR_BG, fg=COLOR_MUTED, font=(UI_FONT, 9)).pack(anchor="w", pady=(4, 0))
+
+        pill = tk.Label(header, text=f"v{APP_VERSION}", bg="#1b2230", fg=COLOR_ACCENT,
+                        font=(MONO_FONT, 9, "bold"), padx=12, pady=5)
+        pill.pack(side="right", pady=(6, 0))
+
+    def _card(self, parent, title, pady=(0, 12)):
+        outer = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                         highlightthickness=1)
+        outer.pack(fill="x", pady=pady)
+        body = tk.Frame(outer, bg=COLOR_CARD)
+        body.pack(fill="both", expand=True, padx=16, pady=(12, 14))
+        tk.Label(body, text=title, bg=COLOR_CARD, fg=COLOR_MUTED,
+                 font=(UI_FONT, 9, "bold")).pack(anchor="w", pady=(0, 10))
+        return body
+
+    def _build_file_card(self, parent):
+        body = self._card(parent, "①  视频文件")
+
+        row = tk.Frame(body, bg=COLOR_CARD)
+        row.pack(fill="x")
 
         self.file_var = tk.StringVar()
-        self.file_entry = tk.Entry(file_frame, textvariable=self.file_var, font=("Segoe UI", 10))
-        self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        tk.Button(file_frame, text="选择视频", width=12, command=self.select_video).pack(side="right")
+        self.file_entry = _entry(row, self.file_var, state="readonly")
+        self.file_entry.pack(side="left", fill="x", expand=True, ipady=7, padx=(0, 10))
 
-        # ② 设置
-        setting_frame = tk.LabelFrame(self.root, text="② 分享安全设置",
-                                      font=("Segoe UI", 10, "bold"), padx=10, pady=10)
-        setting_frame.pack(fill="x", padx=25, pady=8)
+        self.choose_button = _button(row, "选择视频", self.select_video)
+        self.choose_button.pack(side="right")
 
-        tk.Label(setting_frame, text="链接有效期：", font=("Segoe UI", 10)).grid(
-            row=0, column=0, sticky="w")
+    def _build_setting_card(self, parent):
+        body = self._card(parent, "②  分享设置")
+
+        row = tk.Frame(body, bg=COLOR_CARD)
+        row.pack(fill="x")
+
+        tk.Label(row, text="有效期", bg=COLOR_CARD, fg=COLOR_MUTED,
+                 font=(UI_FONT, 9)).pack(side="left", padx=(0, 8))
 
         self.expire_var = tk.StringVar(value="30 分钟")
-        expire_menu = tk.OptionMenu(setting_frame, self.expire_var, *EXPIRE_CHOICES.keys())
-        expire_menu.config(width=12)
-        expire_menu.grid(row=0, column=1, sticky="w", padx=10)
+        combo = ttk.Combobox(row, textvariable=self.expire_var, state="readonly",
+                             values=list(EXPIRE_CHOICES.keys()), width=9,
+                             style="Dark.TCombobox", font=(UI_FONT, 9))
+        combo.pack(side="left")
 
         self.autocopy_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(setting_frame, text="生成后自动复制链接", variable=self.autocopy_var,
-                       font=("Segoe UI", 9)).grid(row=0, column=2, sticky="w", padx=(20, 0))
+        tk.Checkbutton(
+            row, text="生成后自动复制链接", variable=self.autocopy_var,
+            bg=COLOR_CARD, fg=COLOR_MUTED, activebackground=COLOR_CARD,
+            activeforeground=COLOR_TEXT, selectcolor=COLOR_INPUT, bd=0,
+            highlightthickness=0, font=(UI_FONT, 9), cursor="hand2",
+        ).pack(side="left", padx=(18, 0))
 
-        tk.Label(setting_frame, text="随机 Token：", font=("Segoe UI", 10)).grid(
-            row=1, column=0, sticky="w", pady=(10, 0))
-
+        token_row = tk.Frame(body, bg=COLOR_CARD)
+        token_row.pack(fill="x", pady=(12, 0))
+        tk.Label(token_row, text="Token", bg=COLOR_CARD, fg=COLOR_MUTED,
+                 font=(UI_FONT, 9)).pack(side="left", padx=(0, 8))
         self.token_var = tk.StringVar(value="生成后显示")
-        tk.Entry(setting_frame, textvariable=self.token_var, width=52, state="readonly").grid(
-            row=1, column=1, columnspan=3, sticky="w", padx=10, pady=(10, 0))
+        self.token_entry = _entry(token_row, self.token_var, state="readonly",
+                                  font=(MONO_FONT, 9))
+        self.token_entry.pack(side="left", fill="x", expand=True, ipady=5)
 
-        # ③ URL
-        url_frame = tk.LabelFrame(self.root, text="③ 公网 URL",
-                                  font=("Segoe UI", 10, "bold"), padx=10, pady=10)
-        url_frame.pack(fill="x", padx=25, pady=5)
+    def _build_link_card(self, parent):
+        body = self._card(parent, "③  分享链接")
+
+        row = tk.Frame(body, bg=COLOR_CARD)
+        row.pack(fill="x")
 
         self.public_url_var = tk.StringVar(value="等待生成…")
-        tk.Entry(url_frame, textvariable=self.public_url_var, font=("Segoe UI", 10),
-                 state="readonly").pack(side="left", fill="x", expand=True, padx=(0, 10))
-        tk.Button(url_frame, text="📋 复制", width=10, command=self.copy_url).pack(side="right")
+        link_entry = _entry(row, self.public_url_var, state="readonly",
+                            font=(MONO_FONT, 9))
+        link_entry.pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 10))
 
-        # 按钮
-        button_frame = tk.Frame(self.root)
-        button_frame.pack(pady=18)
+        self.copy_button = _button(row, "复制", self.copy_url)
+        self.copy_button.pack(side="right")
 
-        self.start_button = tk.Button(button_frame, text="🚀 生成安全 URL", width=17, height=2,
-                                      font=("Segoe UI", 11, "bold"), command=self.start_server)
-        self.start_button.grid(row=0, column=0, padx=6)
+        actions = tk.Frame(body, bg=COLOR_CARD)
+        actions.pack(fill="x", pady=(12, 0))
 
-        self.stop_button = tk.Button(button_frame, text="⛔ 撤销 / 停止", width=17, height=2,
-                                     font=("Segoe UI", 11), command=self.stop_server, state="disabled")
-        self.stop_button.grid(row=0, column=1, padx=6)
+        self.open_button = _button(actions, "公网打开", self.open_url)
+        self.open_button.pack(side="left")
+        self.preview_button = _button(actions, "本机预览", self.open_local)
+        self.preview_button.pack(side="left", padx=(10, 0))
 
-        self.open_button = tk.Button(button_frame, text="🌐 打开视频", width=17, height=2,
-                                     font=("Segoe UI", 11), command=self.open_url, state="disabled")
-        self.open_button.grid(row=0, column=2, padx=6)
+        _set_enabled(self.open_button, False)
+        _set_enabled(self.preview_button, False)
 
-        self.preview_button = tk.Button(button_frame, text="🖥 本机预览", width=17, height=2,
-                                        font=("Segoe UI", 11), command=self.open_local, state="disabled")
-        self.preview_button.grid(row=0, column=3, padx=6)
+    def _build_actions(self, parent):
+        row = tk.Frame(parent, bg=COLOR_BG)
+        row.pack(fill="x", pady=(4, 14))
 
-        # 状态
-        status_frame = tk.Frame(self.root)
-        status_frame.pack(fill="x", padx=30)
-        tk.Label(status_frame, text="状态：", font=("Segoe UI", 10, "bold")).pack(side="left")
-        self.status_var = tk.StringVar(value="● 未启动")
-        tk.Label(status_frame, textvariable=self.status_var, font=("Segoe UI", 10)).pack(side="left")
+        self.start_button = _button(row, "🚀  生成分享链接", self.start_server,
+                                    kind="primary", width=20)
+        self.start_button.pack(side="left", ipady=6)
+
+        self.stop_button = _button(row, "撤销 / 停止", self.stop_server,
+
+                                   kind="danger", width=14)
+        self.stop_button.pack(side="left", padx=(10, 0), ipady=6)
+        _set_enabled(self.stop_button, False)
+
+    def _build_status(self, parent):
+        card = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                        highlightthickness=1)
+        card.pack(fill="x", pady=(0, 12))
+
+        inner = tk.Frame(card, bg=COLOR_CARD)
+        inner.pack(fill="x", padx=16, pady=12)
+
+        line = tk.Frame(inner, bg=COLOR_CARD)
+        line.pack(fill="x")
+
+        self.status_dot = tk.Canvas(line, width=10, height=10, bg=COLOR_CARD,
+                                    highlightthickness=0)
+        self.status_dot.pack(side="left", pady=2)
+        self._dot_id = self.status_dot.create_oval(1, 1, 9, 9, fill="#5b6478", outline="")
+
+        self.status_var = tk.StringVar(value="未启动")
+        tk.Label(line, textvariable=self.status_var, bg=COLOR_CARD, fg=COLOR_TEXT,
+                 font=(UI_FONT, 10)).pack(side="left", padx=(8, 0))
+
         self.remain_var = tk.StringVar(value="")
-        tk.Label(status_frame, textvariable=self.remain_var, font=("Segoe UI", 10),
-                 fg="#0a7a3f").pack(side="right")
+        tk.Label(line, textvariable=self.remain_var, bg=COLOR_CARD, fg=COLOR_ACCENT,
+                 font=(MONO_FONT, 12, "bold")).pack(side="right")
 
-        # 日志
-        log_frame = tk.LabelFrame(self.root, text="运行日志",
-                                  font=("Segoe UI", 10, "bold"), padx=5, pady=5)
-        log_frame.pack(fill="both", expand=True, padx=25, pady=(10, 6))
-        self.log_text = tk.Text(log_frame, height=10, font=("Consolas", 9), state="disabled",
-                                bg="#111", fg="#ddd", insertbackground="#ddd")
+        self.progress = ttk.Progressbar(inner, style="Bar.Horizontal.TProgressbar",
+                                        maximum=100, value=0)
+        self.progress.pack(fill="x", pady=(10, 0))
+
+    def _build_log(self, parent):
+        outer = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                         highlightthickness=1)
+        outer.pack(fill="both", expand=True)
+        inner = tk.Frame(outer, bg=COLOR_CARD)
+        inner.pack(fill="both", expand=True, padx=12, pady=(10, 12))
+
+        tk.Label(inner, text="运行日志", bg=COLOR_CARD, fg=COLOR_MUTED,
+                 font=(UI_FONT, 9, "bold")).pack(anchor="w", pady=(0, 8))
+
+        box = tk.Frame(inner, bg=COLOR_CARD)
+        box.pack(fill="both", expand=True)
+
+        self.log_text = tk.Text(
+            box, height=9, font=(MONO_FONT, 9), state="disabled",
+            bg="#0b0f15", fg="#b9c4d6", insertbackground="#b9c4d6",
+            relief="flat", bd=0, highlightthickness=0, wrap="word",
+            selectbackground=COLOR_ACCENT, padx=10, pady=8,
+        )
         self.log_text.pack(side="left", fill="both", expand=True)
-        scroll = tk.Scrollbar(log_frame, command=self.log_text.yview)
+
+        scroll = ttk.Scrollbar(box, orient="vertical", command=self.log_text.yview,
+                               style="Dark.Vertical.TScrollbar")
         scroll.pack(side="right", fill="y")
         self.log_text.config(yscrollcommand=scroll.set)
 
-        tk.Label(self.root, text=f"v{APP_VERSION} · 仅监听 127.0.0.1 · 不写入任何磁盘记录",
-                 font=("Segoe UI", 8), fg="#888").pack(pady=(0, 8))
+    # --------------------------------------------------------
+    # 小工具
+    # --------------------------------------------------------
+
+    def _status(self, text, color):
+        self.status_var.set(text)
+        self.status_dot.itemconfigure(self._dot_id, fill=color)
 
     # --------------------------------------------------------
     # 日志
@@ -820,7 +1049,8 @@ class VideoServerGUI:
     def select_video(self):
         path = filedialog.askopenfilename(
             title="选择视频",
-            filetypes=[("视频文件", " ".join("*" + ext for ext in VIDEO_EXTS)), ("所有文件", "*.*")],
+            filetypes=[("视频文件", " ".join("*" + ext for ext in VIDEO_EXTS)),
+                       ("所有文件", "*.*")],
         )
         if not path:
             return
@@ -851,6 +1081,7 @@ class VideoServerGUI:
             return
 
         seconds = EXPIRE_CHOICES[self.expire_var.get()]
+        self.total_seconds = seconds
         STATE.start(video, seconds)
 
         try:
@@ -872,11 +1103,12 @@ class VideoServerGUI:
 
         self.token_var.set(mask(STATE.link_token))
         self.public_url_var.set("正在建立 Cloudflare 隧道…")
-        self.start_button.config(state="disabled")
-        self.stop_button.config(state="normal")
-        self.open_button.config(state="disabled")
-        self.preview_button.config(state="normal")
-        self.status_var.set("● 本地服务已启动")
+        _set_enabled(self.start_button, False)
+        _set_enabled(self.stop_button, True)
+        _set_enabled(self.open_button, False)
+        _set_enabled(self.preview_button, True)
+        self._status("本地服务已启动", COLOR_ACCENT)
+        self.progress.configure(value=100)
 
         self.log("=" * 46)
         self.log("启动分享")
@@ -897,14 +1129,14 @@ class VideoServerGUI:
             return
         if not os.path.isfile(CLOUDFLARED_PATH):
             self.log(f"找不到 cloudflared：{CLOUDFLARED_PATH}")
-            self.status_var.set("● 找不到 cloudflared.exe")
+            self._status("找不到 cloudflared.exe", COLOR_DANGER)
             messagebox.showerror("缺少 cloudflared.exe",
                                  "请把 cloudflared.exe 放到程序目录：\n\n" + BASE_DIR)
             self.stop_server()
             return
 
         self.log("正在建立 Cloudflare Quick Tunnel…")
-        self.status_var.set("● 正在建立公网连接…")
+        self._status("正在建立公网连接…", COLOR_ACCENT)
 
         try:
             self.cloudflare_process = subprocess.Popen(
@@ -967,8 +1199,8 @@ class VideoServerGUI:
         self.public_url = url
         STATE.set_public_url(url)
         self.public_url_var.set(url)
-        self.status_var.set("● 安全公网 URL 已生成")
-        self.open_button.config(state="normal")
+        self._status("公网链接已就绪", "#3ddc97")
+        _set_enabled(self.open_button, True)
         self.log(f"公网 URL：{url}")
         if self.autocopy_var.get():
             self._copy_to_clipboard(url)
@@ -992,6 +1224,8 @@ class VideoServerGUI:
             return
         left = STATE.remaining()
         self.remain_var.set(f"剩余 {format_seconds(left)}")
+        if self.total_seconds:
+            self.progress.configure(value=max(0.0, left / self.total_seconds * 100))
         if left <= 0:
             self.log("链接已到期，自动停止分享。")
             self.stop_server(auto=True)
@@ -1009,14 +1243,14 @@ class VideoServerGUI:
 
     def copy_url(self):
         if not self.public_url:
-            messagebox.showwarning("提示", "还没有生成公网 URL。")
+            messagebox.showwarning("提示", "还没有生成公网链接。")
             return
         self._copy_to_clipboard(self.public_url)
-        self.log("公网 URL 已复制。")
+        self.log("公网链接已复制。")
 
     def open_url(self):
         if not self.public_url:
-            messagebox.showwarning("提示", "还没有生成公网 URL。")
+            messagebox.showwarning("提示", "还没有生成公网链接。")
             return
         import webbrowser
         webbrowser.open(self.public_url)
@@ -1068,17 +1302,19 @@ class VideoServerGUI:
         self.public_url = ""
         self.local_url = ""
         self.port = 0
+        self.total_seconds = 0
         self._cf_buffer.clear()
 
-        self.public_url_var.set("已停止 / 已撤销" if not auto else "已于到期时停止")
+        self.public_url_var.set("已停止 / 已撤销" if not auto else "已到到期时间自动停止")
         self.token_var.set("已撤销")
-        self.status_var.set("● 已停止")
+        self._status("已停止", "#5b6478")
         self.remain_var.set("")
-        self.start_button.config(state="normal")
-        self.stop_button.config(state="disabled")
-        self.open_button.config(state="disabled")
-        self.preview_button.config(state="disabled")
-        self.log("分享已撤销，隧道已关闭。")
+        self.progress.configure(value=0)
+        _set_enabled(self.start_button, True)
+        _set_enabled(self.stop_button, False)
+        _set_enabled(self.open_button, False)
+        _set_enabled(self.preview_button, False)
+        self.log("分享已撤销，隧道已关闭。" if not auto else "分享到期，隧道已关闭。")
 
     # --------------------------------------------------------
     # 关闭
@@ -1098,6 +1334,12 @@ class VideoServerGUI:
 
 def main():
     root = tk.Tk()
+    try:
+        ico = os.path.join(BASE_DIR, "SecureLocalVideoServer.ico")
+        if os.path.isfile(ico):
+            root.iconbitmap(ico)
+    except Exception:
+        pass
     VideoServerGUI(root)
     root.mainloop()
 
