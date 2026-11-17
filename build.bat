@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Secure Local Video Server V2.1.0 Build Tool
+title Secure Local Video Server V2.1.2 Build Tool
 
 rem 用 Python 3.10（PyInstaller / Flask 装在这上面；py 默认的 3.15 里没有）
 set "PYTHON=py -3.10"
@@ -8,7 +8,7 @@ set "APPNAME=SecureLocalVideoServer"
 
 echo.
 echo ==========================================
-echo Building %APPNAME% V2.1.0...
+echo Building %APPNAME% V2.1.2...
 echo ==========================================
 echo.
 

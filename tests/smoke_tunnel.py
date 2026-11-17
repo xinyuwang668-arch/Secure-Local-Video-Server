@@ -81,11 +81,20 @@ def main():
             print("TUNNEL: FAILED", last_error)
             return 1
 
-        start = body.index('src="/s/') + len('src="')
-        media = base + body[start:body.index('"', start)]
+        start = body.index('var SRC = "') + len('var SRC = "')
+        media_path = body[start:body.index('"', start)]
+        media = base + media_path
+        sid_cookie = cookie.split(";")[0]
+
+        # 页面心跳（没有它媒体接口不给流）
+        parts = media_path.strip("/").split("/")
+        beat = urllib.request.Request(base + f"/h/{parts[1]}/{parts[2]}", data=b"",
+                                      headers={"User-Agent": UA, "Cookie": sid_cookie})
+        with urllib.request.urlopen(beat, timeout=30) as resp:
+            print("heartbeat:", resp.status)
 
         req = urllib.request.Request(media, headers={
-            "User-Agent": UA, "Cookie": cookie.split(";")[0],
+            "User-Agent": UA, "Cookie": sid_cookie,
             "Sec-Fetch-Dest": "video", "Referer": public,
             "Range": "bytes=0-1023"})
         with urllib.request.urlopen(req, timeout=30) as resp:

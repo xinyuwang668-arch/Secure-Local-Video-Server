@@ -32,7 +32,7 @@ from werkzeug.serving import make_server
 # ============================================================
 
 APP_NAME = "Secure Local Video Server"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 HOST = "127.0.0.1"
 # 端口 0 = 由系统分配空闲端口，避免固定 8000 被占用导致启动失败。
@@ -41,6 +41,10 @@ PORT = 0
 CHUNK_SIZE = 256 * 1024
 MAX_LOG_LINES = 400
 MAX_SESSIONS = 6
+
+# 页面 JS 每 2 秒发一次心跳；超过这个时间没心跳，媒体连接立刻掐断。
+# 下载器不会执行 JS，页面切到后台/关掉后心跳也会停——这是防下载的硬闸。
+HEARTBEAT_TTL = 6.0
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     BASE_DIR = sys._MEIPASS
@@ -200,6 +204,8 @@ class ShareState:
                 "ticket": secrets.token_urlsafe(24),
                 "created": time.time(),
                 "hits": deque(maxlen=600),
+                "beat": 0.0,
+                "stream_seq": 0,
             }
             self.sessions[session["sid"]] = session
             return session
@@ -228,6 +234,29 @@ class ShareState:
     def forget_session(self, sid: str) -> None:
         with self._lock:
             self.sessions.pop(sid, None)
+
+    # ---------- 心跳闸 ----------
+
+    def beat(self, sid: str) -> bool:
+        with self._lock:
+            session = self.sessions.get(sid)
+            if session is None:
+                return False
+            session["beat"] = time.time()
+            return True
+
+    def beat_fresh(self, session: dict) -> bool:
+        return time.time() - float(session.get("beat", 0.0)) <= HEARTBEAT_TTL
+
+    def begin_stream(self, session: dict) -> int:
+        """开一条新的取流连接，同会话之前的连接立刻作废。"""
+        with self._lock:
+            session["stream_seq"] = int(session.get("stream_seq", 0)) + 1
+            return session["stream_seq"]
+
+    def stream_alive(self, session: dict, seq: int) -> bool:
+        with self._lock:
+            return (session.get("stream_seq") == seq) and self.beat_fresh(session)
 
 
 STATE = ShareState()
@@ -354,9 +383,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     <h1>@@FILENAME@@</h1>
     <div class="meta">剩余时间 <b id="t">@@TIME@@</b> · 到期自动失效</div>
     <video id="p" controls playsinline webkit-playsinline x5-playsinline
-           preload="metadata" controlslist="nodownload noplaybackrate noremoteplayback"
+           preload="none" controlslist="nodownload noplaybackrate noremoteplayback"
            disablepictureinpicture oncontextmenu="return false;">
-        <source src="@@SRC@@" type="@@MIME@@">
         你的浏览器不支持 HTML5 视频。
     </video>
     <div id="wm" class="wm">@@MARK@@</div>
@@ -368,6 +396,40 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     var timer = document.getElementById("t");
     var box = document.querySelector(".player");
     var left = @@REMAIN@@;
+    var SRC = "@@SRC@@";
+    var MIME = "@@MIME@@";
+    var HB = "/h/@@SID@@/@@TICKET@@";
+    var expired = false;
+    var started = false;
+
+    // 心跳：媒体接口只认「页面在、页面可见」的会话。下载器不会执行这段 JS，
+    // 页面切到后台或直接关掉，心跳停下，服务器 6 秒内掐断取流。
+    function beat() {
+        if (expired) { return Promise.resolve(false); }
+        if (document.visibilityState && document.visibilityState !== "visible") {
+            return Promise.resolve(false);
+        }
+        return fetch(HB, {
+            method: "POST", cache: "no-store", credentials: "same-origin",
+            keepalive: true
+        }).then(function (r) { return r.ok; }).catch(function () { return false; });
+    }
+
+    function startPlayback() {
+        if (started || expired) { return; }
+        started = true;
+        var src = document.createElement("source");
+        src.src = SRC;
+        src.type = MIME;
+        player.appendChild(src);
+        player.load();
+    }
+
+    beat().then(startPlayback);
+    setInterval(beat, 2000);
+    document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") { beat(); }
+    });
 
     function fmt(sec) {
         var h = Math.floor(sec / 3600);
@@ -379,8 +441,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     }
 
     function stopPlayback() {
+        expired = true;
         try {
             player.pause();
+            while (player.firstChild) { player.removeChild(player.firstChild); }
             player.removeAttribute("src");
             player.load();
         } catch (e) {}
@@ -451,6 +515,8 @@ def render_page(token: str, session: dict) -> str:
     page = page.replace("@@TIME@@", format_seconds(remaining))
     page = page.replace("@@SRC@@", media_url)
     page = page.replace("@@MIME@@", get_mime_type(filename))
+    page = page.replace("@@SID@@", session["sid"])
+    page = page.replace("@@TICKET@@", session["ticket"])
     page = page.replace("@@MARK@@", html.escape(session["sid"][:10]))
     page = page.replace("@@REMAIN@@", str(remaining))
     return page
@@ -512,8 +578,9 @@ def video_page(token):
     response = make_response(render_page(token, session))
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'; "
-        "script-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"
+        "default-src 'none'; media-src 'self'; connect-src 'self'; "
+        "style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; "
+        "form-action 'none'; base-uri 'none'"
     )
     response.set_cookie(
         "slvs_sid",
@@ -523,6 +590,30 @@ def video_page(token):
         samesite="Strict",
         path="/",
     )
+    return response
+
+
+@app.route("/h/<sid>/<ticket>", methods=["POST"])
+def heartbeat(sid, ticket):
+    """页面 JS 的心跳。没有它，媒体接口一条字节都不给。"""
+    if not STATE.live():
+        abort(410)
+
+    user_agent = request.headers.get("User-Agent", "")
+    if ua_blocked(user_agent):
+        abort(403)
+
+    if request.cookies.get("slvs_sid") != sid:
+        abort(403)
+
+    if STATE.session_ok(sid, ticket, user_agent) is None:
+        abort(403)
+
+    if not STATE.beat(sid):
+        abort(403)
+
+    response = make_response("", 204)
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -557,12 +648,16 @@ def parse_range(header: str, size: int):
     return start, end
 
 
-def iter_file(path: str, start: int, length: int, deadline: float):
+def iter_file(path: str, start: int, length: int, deadline: float,
+              session: dict, seq: int):
     remaining = length
     with open(path, "rb") as handle:
         handle.seek(start)
         while remaining > 0:
             if time.time() >= deadline:
+                break
+            # 心跳断了 / 被新连接顶掉，立刻停止发送。
+            if not STATE.stream_alive(session, seq):
                 break
             data = handle.read(min(CHUNK_SIZE, remaining))
             if not data:
@@ -620,6 +715,10 @@ def stream_video(sid, ticket):
     if size <= 0:
         abort(410)
 
+    # 硬闸：没有新鲜心跳就不给流。下载器不会执行页面 JS，页面切走/关掉也会停心跳。
+    if not STATE.beat_fresh(session):
+        abort(403)
+
     deadline = STATE.expires_at
     mime = get_mime_type(STATE.filename())
 
@@ -645,8 +744,11 @@ def stream_video(sid, ticket):
 
     length = end - start + 1
 
+    # 同一会话只保留一条取流连接：新的顶掉旧的，防止播放的同时开一条下载。
+    seq = STATE.begin_stream(session)
+
     response = Response(
-        iter_file(path, start, length, deadline),
+        iter_file(path, start, length, deadline, session, seq),
         status=status,
         mimetype=mime,
         direct_passthrough=True,

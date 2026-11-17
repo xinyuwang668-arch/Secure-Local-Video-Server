@@ -89,9 +89,19 @@ class SLVSTestCase(unittest.TestCase):
                                         "Sec-Fetch-Mode": "navigate"})
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
-        start = body.index('src="/s/') + len('src="')
+        start = body.index('var SRC = "') + len('var SRC = "')
         end = body.index('"', start)
-        return body[start:end]
+        url = body[start:end]
+        self._beat(url)
+        return url
+
+    def _beat(self, url):
+        parts = url.strip("/").split("/")
+        sid, ticket = parts[1], parts[2]
+        resp = self.client.post(f"/h/{sid}/{ticket}",
+                                headers={"User-Agent": BROWSER_UA})
+        self.assertEqual(resp.status_code, 204)
+        return sid
 
     def _headers(self, **extra):
         headers = {"User-Agent": BROWSER_UA,
@@ -172,6 +182,14 @@ class SLVSTestCase(unittest.TestCase):
         resp = self.client.get("/robots.txt")
         self.assertEqual(resp.status_code, 404)
         self.assertIn("Disallow: /", resp.get_data(as_text=True))
+
+    def test_stream_without_heartbeat_rejected(self):
+        """页面不在（没有心跳）时，媒体地址一个字节都不给。"""
+        url = self._open_page()
+        for session in slvs.STATE.sessions.values():
+            session["beat"] = 0.0
+        resp = self.client.get(url, headers=self._headers())
+        self.assertEqual(resp.status_code, 403)
 
     def test_token_not_in_page_html(self):
         """完整链接 Token 不应出现在页面 HTML 里（只出现在地址栏）。"""

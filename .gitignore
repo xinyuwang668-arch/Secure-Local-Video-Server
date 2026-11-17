@@ -79,3 +79,5 @@ cloudflared.log
 
 # Local backups
 _backup_*/
+
+_demo.mp4

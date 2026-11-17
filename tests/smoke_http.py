@@ -57,13 +57,46 @@ def main():
     body = resp.read().decode("utf-8", "replace")
     cookie = resp.getheader("Set-Cookie", "")
     check("页面 200", resp.status == 200, f"({resp.status})")
-    check("页面含媒体地址", 'src="/s/' in body)
+    check("页面含媒体地址", 'var SRC = "/s/' in body)
     check("下发 HttpOnly Cookie", "HttpOnly" in cookie)
     conn.close()
 
     sid_cookie = cookie.split(";")[0]
-    start = body.index('src="/s/') + len('src="')
+    start = body.index('var SRC = "') + len('var SRC = "')
     media_path = body[start:body.index('"', start)]
+
+    def heartbeat(cookie_value, path):
+        parts = path.strip("/").split("/")
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request("POST", f"/h/{parts[1]}/{parts[2]}",
+                  headers={"User-Agent": UA, "Cookie": cookie_value})
+        r = c.getresponse()
+        r.read()
+        code = r.status
+        c.close()
+        return code
+
+    # 2. 没有心跳的会话，媒体地址直接 403（硬闸）
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request("GET", f"/v/{slvs.STATE.link_token}",
+                 headers={"User-Agent": UA, "Accept": "text/html",
+                          "Sec-Fetch-Mode": "navigate"})
+    resp = conn.getresponse()
+    resp.read()
+    cold_cookie = resp.getheader("Set-Cookie", "").split(";")[0]
+    conn.close()
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request("GET", media_path, headers={
+        "User-Agent": UA, "Cookie": cold_cookie, "Sec-Fetch-Dest": "video",
+        "Referer": local})
+    resp = conn.getresponse()
+    resp.read()
+    check("无心跳被拒", resp.status == 403, f"({resp.status})")
+    conn.close()
+
+    # 3. 页面心跳后再取流
+    code = heartbeat(sid_cookie, media_path)
+    check("心跳 204", code == 204, f"({code})")
 
     # 2. 正常播放：Range 请求
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
