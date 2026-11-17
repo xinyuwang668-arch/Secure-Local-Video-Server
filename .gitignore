@@ -80,4 +80,4 @@ cloudflared.log
 # Local backups
 _backup_*/
 
-_demo.mp4
+_demo*.mp4
